@@ -6,17 +6,22 @@ from pathlib import Path
 
 from src.utils import euclidean_distance, landmark_to_pixel, draw_alert
 
-# MediaPipe mouth landmark indices (inner lip center approximation)
+# MediaPipe mouth landmark indices
 UPPER_LIP = 13
 LOWER_LIP = 14
 LIP_LEFT = 78
 LIP_RIGHT = 308
 
-# Fingertip landmark indices (MediaPipe Hands)
-FINGERTIPS = [4, 8, 12, 16, 20]
+# Outer lip corners and top/bottom for a broader mouth region
+MOUTH_LANDMARKS = [13, 14, 78, 308, 82, 312, 87, 317, 95, 324, 185, 409]
+
+# Hand landmark indices: fingertips + DIP joints (one segment below each tip)
+# Thumb: 3=IP, 4=TIP | Index: 7=DIP, 8=TIP | Middle: 11=DIP, 12=TIP
+# Ring: 15=DIP, 16=TIP | Pinky: 19=DIP, 20=TIP
+FINGER_LANDMARKS = [3, 4, 7, 8, 11, 12, 15, 16, 19, 20]
 
 # Detection threshold: fraction of face width
-NAIL_BITE_THRESHOLD_RATIO = 0.15
+NAIL_BITE_THRESHOLD_RATIO = 0.35
 
 MODELS_DIR = Path(__file__).parent.parent / "models"
 
@@ -65,7 +70,7 @@ class BiteDetector:
         face_result = self._face_landmarker.detect(mp_image)
         hand_result = self._hand_landmarker.detect(mp_image)
 
-        lip_center: tuple[float, float] | None = None
+        mouth_pixels: list[tuple[int, int]] = []
         face_width: float | None = None
 
         if face_result.face_landmarks:
@@ -77,23 +82,17 @@ class BiteDetector:
                 p2 = landmark_to_pixel(lms[connection.end], w, h)
                 cv2.line(debug, p1, p2, (80, 80, 80), 1)
 
-            # Highlight key lip landmarks
-            for idx in [UPPER_LIP, LOWER_LIP, LIP_LEFT, LIP_RIGHT]:
+            # Collect and highlight mouth region landmarks
+            for idx in MOUTH_LANDMARKS:
                 px = landmark_to_pixel(lms[idx], w, h)
+                mouth_pixels.append(px)
                 cv2.circle(debug, px, 4, (0, 255, 0), -1)
-
-            upper_px = landmark_to_pixel(lms[UPPER_LIP], w, h)
-            lower_px = landmark_to_pixel(lms[LOWER_LIP], w, h)
-            lip_center = (
-                (upper_px[0] + lower_px[0]) / 2,
-                (upper_px[1] + lower_px[1]) / 2,
-            )
 
             left_px = landmark_to_pixel(lms[LIP_LEFT], w, h)
             right_px = landmark_to_pixel(lms[LIP_RIGHT], w, h)
             face_width = euclidean_distance(left_px, right_px)
 
-        fingertip_pixels: list[tuple[int, int]] = []
+        finger_pixels: list[tuple[int, int]] = []
         if hand_result.hand_landmarks:
             for hand_lms in hand_result.hand_landmarks:
                 # Draw hand connections
@@ -102,18 +101,20 @@ class BiteDetector:
                     p2 = landmark_to_pixel(hand_lms[connection.end], w, h)
                     cv2.line(debug, p1, p2, (0, 180, 255), 2)
 
-                for tip_idx in FINGERTIPS:
-                    px = landmark_to_pixel(hand_lms[tip_idx], w, h)
-                    fingertip_pixels.append(px)
+                for lm_idx in FINGER_LANDMARKS:
+                    px = landmark_to_pixel(hand_lms[lm_idx], w, h)
+                    finger_pixels.append(px)
                     cv2.circle(debug, px, 6, (255, 0, 0), -1)
 
         nail_biting = False
-        if lip_center and face_width and fingertip_pixels:
+        if mouth_pixels and face_width and finger_pixels:
             threshold_px = face_width * NAIL_BITE_THRESHOLD_RATIO
-            for tip in fingertip_pixels:
-                dist = euclidean_distance(tip, lip_center)
-                if dist < threshold_px:
-                    nail_biting = True
+            for finger_pt in finger_pixels:
+                for mouth_pt in mouth_pixels:
+                    if euclidean_distance(finger_pt, mouth_pt) < threshold_px:
+                        nail_biting = True
+                        break
+                if nail_biting:
                     break
 
         if nail_biting:
