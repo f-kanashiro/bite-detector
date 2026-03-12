@@ -1,6 +1,7 @@
 import cv2
 import mediapipe as mp
 import numpy as np
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -44,7 +45,7 @@ class BiteDetector:
                 base_options=BaseOptions(
                     model_asset_path=str(MODELS_DIR / "face_landmarker.task")
                 ),
-                running_mode=VisionRunningMode.IMAGE,
+                running_mode=VisionRunningMode.VIDEO,
                 num_faces=1,
             )
         )
@@ -53,10 +54,13 @@ class BiteDetector:
                 base_options=BaseOptions(
                     model_asset_path=str(MODELS_DIR / "hand_landmarker.task")
                 ),
-                running_mode=VisionRunningMode.IMAGE,
+                running_mode=VisionRunningMode.VIDEO,
                 num_hands=2,
+                min_hand_detection_confidence=0.3,
+                min_hand_presence_confidence=0.3,
             )
         )
+        self._start_ms = time.monotonic_ns() // 1_000_000
 
     def process(self, frame: np.ndarray) -> DetectionResult:
         h, w = frame.shape[:2]
@@ -67,8 +71,9 @@ class BiteDetector:
             data=cv2.cvtColor(frame, cv2.COLOR_BGR2RGB),
         )
 
-        face_result = self._face_landmarker.detect(mp_image)
-        hand_result = self._hand_landmarker.detect(mp_image)
+        timestamp_ms = time.monotonic_ns() // 1_000_000 - self._start_ms
+        face_result = self._face_landmarker.detect_for_video(mp_image, timestamp_ms)
+        hand_result = self._hand_landmarker.detect_for_video(mp_image, timestamp_ms)
 
         mouth_pixels: list[tuple[int, int]] = []
         face_width: float | None = None
