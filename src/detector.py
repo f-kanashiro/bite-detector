@@ -107,20 +107,24 @@ class BiteDetector:
                     cv2.circle(debug, px, 6, (255, 0, 0), -1)
 
         nail_biting = False
-        if mouth_pixels and face_width and finger_pixels:
+        if mouth_pixels and face_width is not None and finger_pixels:
             threshold_px = face_width * NAIL_BITE_THRESHOLD_RATIO
-            for finger_pt in finger_pixels:
-                for mouth_pt in mouth_pixels:
-                    if euclidean_distance(finger_pt, mouth_pt) < threshold_px:
-                        nail_biting = True
-                        break
-                if nail_biting:
-                    break
+            nail_biting = any(
+                euclidean_distance(fp, mp_) < threshold_px
+                for fp in finger_pixels
+                for mp_ in mouth_pixels
+            )
 
         if nail_biting:
             draw_alert(debug, "NAIL BITING DETECTED")
 
         return DetectionResult(nail_biting=nail_biting, debug_frame=debug)
+
+    def __enter__(self) -> "BiteDetector":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self.close()
 
     def close(self) -> None:
         self._face_landmarker.close()
